@@ -79,6 +79,12 @@ int gasThreshold = 2000;
 int smokeThreshold = 2000;
 
 const int tempFaultRawThreshold = 4090;
+const int tempReadSamples = 8;
+const float tempSmoothingAlpha = 0.15;
+const int tempFaultDebounceCount = 5;
+
+bool tempInitialized = false;
+int tempFaultCounter = 0;
 
 const int loopDelayMs = 150;
 
@@ -104,6 +110,18 @@ void motorStop()
 
     digitalWrite(IN3, LOW);
     digitalWrite(IN4, LOW);
+}
+
+int readTempRawAveraged()
+{
+    long sum = 0;
+
+    for(int i = 0; i < tempReadSamples; i++)
+    {
+        sum += analogRead(TEMP_SENSOR);
+    }
+
+    return sum / tempReadSamples;
 }
 
 void calibrateGasSmokeSensors()
@@ -1139,14 +1157,7 @@ void loop()
     analogRead(SMOKE_SENSOR);
 
     int tempRaw =
-    analogRead(TEMP_SENSOR);
-
-    // LM35: 10mV per °C, ESP32-S3 ADC is 12-bit over 0-3.3V
-    float tempVoltage =
-    (tempRaw * 3.3) / 4095.0;
-
-    temperature =
-    tempVoltage * 100.0;
+    readTempRawAveraged();
 
     gasDetected =
     gasValue > gasThreshold;
@@ -1158,8 +1169,43 @@ void loop()
     // TEMPERATURE STATUS
     // =================================================
 
+    // Debounce the fault flag so a single noisy ADC sample
+    // can't flip the display between a real reading and "--"
+    if(tempRaw >= tempFaultRawThreshold)
+    {
+        tempFaultCounter++;
+    }
+    else
+    {
+        tempFaultCounter = 0;
+    }
+
     tempSensorFault =
-    tempRaw >= tempFaultRawThreshold;
+    tempFaultCounter >= tempFaultDebounceCount;
+
+    if(!tempSensorFault)
+    {
+        // LM35: 10mV per °C, ESP32-S3 ADC is 12-bit over 0-3.3V
+        float tempVoltage =
+        (tempRaw * 3.3) / 4095.0;
+
+        float tempSample =
+        tempVoltage * 100.0;
+
+        if(!tempInitialized)
+        {
+            temperature = tempSample;
+            tempInitialized = true;
+        }
+        else
+        {
+            // Exponential moving average so the reading eases
+            // toward the new value instead of jumping instantly
+            temperature =
+            (tempSmoothingAlpha * tempSample) +
+            ((1.0 - tempSmoothingAlpha) * temperature);
+        }
+    }
 
     if(tempSensorFault)
     {
