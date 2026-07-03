@@ -1141,8 +1141,12 @@ void loop()
     int tempRaw =
     analogRead(TEMP_SENSOR);
 
+    // LM35: 10mV per °C, ESP32-S3 ADC is 12-bit over 0-3.3V
+    float tempVoltage =
+    (tempRaw * 3.3) / 4095.0;
+
     temperature =
-    (tempRaw * 100.0) / 4095.0;
+    tempVoltage * 100.0;
 
     gasDetected =
     gasValue > gasThreshold;
